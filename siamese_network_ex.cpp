@@ -418,6 +418,7 @@ int main(int argc, char* argv[]) try
     dlib::dnn_trainer<net_type,dlib::sgd> trainer(net, dlib::sgd(0.0,0.9));
     trainer.set_learning_rate(0.01);
     trainer.set_mini_batch_size(64);
+    trainer.set_max_num_epochs(100);
     trainer.be_verbose();
 
     // This saves the training progress in an synchronization file every 20
@@ -427,8 +428,8 @@ int main(int argc, char* argv[]) try
     // This sets the learning rate policy for this trainer. dlib's trainer has a
     // special policy that only shrinks the learning rate when there has been no
     // progress in a specified number of batch iterations.
-    trainer.set_iterations_without_progress_threshold(2000);
-    trainer.set_min_learning_rate(0.0001);
+    trainer.set_iterations_without_progress_threshold(2500);
+    trainer.set_learning_rate_shrink_factor(0.9);
 
     // Train the network using the MNIST data.
     trainer.train(training_pairs, training_labels);
@@ -441,80 +442,78 @@ int main(int argc, char* argv[]) try
     
     // Let us now get training and testing results for this particular label
     // threshold.
-    double thresh = 0.5;
-    for (unsigned int i = 0; i < 10; ++i) {
-        // This shows that how the label threshold defined above in the
-        // loss_contrastive layer can be modified.
-        dlib::layer<0>(net).loss_details().set_label_threshold(thresh);
-        std::cout << "Results for label_threshold=" << thresh << std::endl;
+    double thresh = 1.25;
 
-        std::vector<unsigned char> predicted_labels = net(training_pairs);
-        int num_true_positives = 0;
-        int num_false_positives = 0;
-        int num_true_negatives = 0;
-        int num_false_negatives = 0;
-        for (std::size_t i = 0; i < training_pairs.size(); ++i) {
-            if (training_labels[i] == 1) {
-                if (predicted_labels[i] == 1) {
-                    ++num_true_positives;
-                }
-                else {
-                    ++num_false_positives;
-                }
+    // This shows that how the label threshold defined above in the
+    // loss_contrastive layer can be modified.
+    dlib::layer<0>(net).loss_details().set_label_threshold(thresh);
+    std::cout << "Results for label_threshold=" << thresh << std::endl;
+
+    std::vector<unsigned char> predicted_labels = net(training_pairs);
+    int num_true_positives = 0;
+    int num_false_positives = 0;
+    int num_true_negatives = 0;
+    int num_false_negatives = 0;
+    for (std::size_t i = 0; i < training_pairs.size(); ++i) {
+        if (training_labels[i] == 1) {
+            if (predicted_labels[i] == 1) {
+                ++num_true_positives;
             }
             else {
-                if (training_labels[i] == 0) {
-                    ++num_true_negatives;
-                }
-                else {
-                    ++num_false_negatives;
-                }
+                ++num_false_positives;
             }
         }
-        std::cout << "training num_true_positives: " << num_true_positives << std::endl;
-        std::cout << "training num_false_positives: " << num_false_positives << std::endl;
-        std::cout << "training num_true_negatives: " << num_true_negatives << std::endl;
-        std::cout << "training num_false_negatives: " << num_false_negatives << std::endl;
-        std::cout << "training accuracy:  "
-                  << (num_true_positives+num_true_negatives)/(double)(num_true_positives+
-                                                                      num_false_positives+
-                                                                      num_true_negatives+
-                                                                      num_false_negatives) << std::endl;
-
-        predicted_labels = net(testing_pairs);
-        num_true_positives = 0;
-        num_false_positives = 0;
-        num_true_negatives = 0;
-        num_false_negatives = 0;
-        for (std::size_t i = 0; i < testing_pairs.size(); ++i) {
-            if (testing_labels[i] == 1) {
-                if (predicted_labels[i] == 1) {
-                    ++num_true_positives;
-                }
-                else {
-                    ++num_false_positives;
-                }
+        else {
+            if (predicted_labels[i] == 0) {
+                ++num_true_negatives;
             }
             else {
-                if (predicted_labels[i] == 0) {
-                    ++num_true_negatives;
-                }
-                else {
-                    ++num_false_negatives;
-                }
+                ++num_false_negatives;
             }
         }
-        std::cout << "testing num_true_positives: " << num_true_positives << std::endl;
-        std::cout << "testing num_false_positives: " << num_false_positives << std::endl;
-        std::cout << "testing num_true_negatives: " << num_true_negatives << std::endl;
-        std::cout << "testing num_false_negatives: " << num_false_negatives << std::endl;
-        std::cout << "testing accuracy:  "
-                  << (num_true_positives+num_true_negatives)/(double)(num_true_positives+
-                                                                      num_false_positives+
-                                                                      num_true_negatives+
-                                                                      num_false_negatives) << std::endl;
-        thresh += 0.5;
     }
+    std::cout << "training num_true_positives: " << num_true_positives << std::endl;
+    std::cout << "training num_false_positives: " << num_false_positives << std::endl;
+    std::cout << "training num_true_negatives: " << num_true_negatives << std::endl;
+    std::cout << "training num_false_negatives: " << num_false_negatives << std::endl;
+    std::cout << "training accuracy:  "
+              << (num_true_positives+num_true_negatives)/(double)(num_true_positives+
+                                                                  num_false_positives+
+                                                                  num_true_negatives+
+                                                                  num_false_negatives) << std::endl;
+
+    predicted_labels = net(testing_pairs);
+    num_true_positives = 0;
+    num_false_positives = 0;
+    num_true_negatives = 0;
+    num_false_negatives = 0;
+    for (std::size_t i = 0; i < testing_pairs.size(); ++i) {
+        if (testing_labels[i] == 1) {
+            if (predicted_labels[i] == 1) {
+                ++num_true_positives;
+            }
+            else {
+                ++num_false_positives;
+            }
+        }
+        else {
+            if (predicted_labels[i] == 0) {
+                ++num_true_negatives;
+            }
+            else {
+                ++num_false_negatives;
+            }
+        }
+    }
+    std::cout << "testing num_true_positives: " << num_true_positives << std::endl;
+    std::cout << "testing num_false_positives: " << num_false_positives << std::endl;
+    std::cout << "testing num_true_negatives: " << num_true_negatives << std::endl;
+    std::cout << "testing num_false_negatives: " << num_false_negatives << std::endl;
+    std::cout << "testing accuracy:  "
+              << (num_true_positives+num_true_negatives)/(double)(num_true_positives+
+                                                                  num_false_positives+
+                                                                  num_true_negatives+
+                                                                  num_false_negatives) << std::endl;
 }
 catch (std::exception& e)
 {
