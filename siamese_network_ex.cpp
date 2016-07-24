@@ -127,8 +127,15 @@ public:
 
     // The label threshold here just defines a distance with which we say image
     // pairs are the same or not.
-    double get_label_threshold() const;
-    void set_label_threshold(double thresh);
+    double get_label_threshold() const
+    {
+        return thresh;
+    }
+
+    void set_label_threshold(double thresh_)
+    {
+        thresh = thresh_;
+    }
 
     // This function defines how this layer can convert the output of a network
     // into a label. Here, we just define a sample to be the same image if the
@@ -301,9 +308,9 @@ using loss_contrastive = dlib::add_loss_layer<loss_contrastive_,SUBNET>;    // <
 
 // ---------------------------------------------------------------------------
 
-// This function conveniently converts MNIST data into image pair data. This
-// operates similarly to the convert_mnist_siamese_data code in the Caffe
-// siamese example.
+// This function conveniently converts MNIST data into image pair data. It
+// attempts to create a Siamese dataset with a fairly balanced number of
+// positives and negatives.
 void create_mnist_siamese_dataset(
     char* mnist_dir,
     std::vector<image_pair>& training_pairs,
@@ -322,39 +329,43 @@ void create_mnist_siamese_dataset(
     training_pairs.reserve(training_images_.size());
     training_labels.reserve(training_images_.size());
     for (unsigned long i = 0; i < training_images_.size(); ++i) {
-        unsigned long idx1 = rnd.get_random_64bit_number() % training_images_.size();
-        unsigned long idx2 = rnd.get_random_64bit_number() % training_images_.size();
-        while (idx1 == idx2) {
-            idx1 = rnd.get_random_64bit_number() % training_images_.size();
-            idx2 = rnd.get_random_64bit_number() % training_images_.size();
-        }
-
-        training_pairs.push_back(std::make_pair(training_images_[idx1], training_images_[idx2]));
-        if (training_labels_[idx1] == training_labels_[idx2]) {
+        unsigned long j = rnd.get_random_64bit_number() % training_images_.size();
+        double coin_flip = rnd.get_random_double();
+        if (coin_flip >= 0.5) { // get a positive example
+            while (training_labels_[i] != training_labels_[j]) {
+                j = rnd.get_random_64bit_number() % training_images_.size();
+            }
             training_labels.push_back(1);
         }
-        else {
+        else { // get a negative example
+            while (training_labels_[i] == training_labels_[j]) {
+                j = rnd.get_random_64bit_number() % training_images_.size();
+            }
             training_labels.push_back(0);
         }
+        // add image pair
+        training_pairs.push_back(std::make_pair(training_images_[i], training_images_[j]));
     }
 
-    testing_pairs.reserve( testing_images_.size());
+    testing_pairs.reserve(testing_images_.size());
     testing_labels.reserve(testing_images_.size());
     for (unsigned long i = 0; i < testing_images_.size(); ++i) {
-        unsigned long idx1 = rnd.get_random_64bit_number() % testing_images_.size();
-        unsigned long idx2 = rnd.get_random_64bit_number() % testing_images_.size();
-        while (idx1 == idx2) {
-            idx1 = rnd.get_random_64bit_number() % testing_images_.size();
-            idx2 = rnd.get_random_64bit_number() % testing_images_.size();
-        }
-
-        testing_pairs.push_back(std::make_pair(testing_images_[idx1], testing_images_[idx2]));
-        if (testing_labels_[idx1] == testing_labels_[idx2]) {
+        unsigned long j = rnd.get_random_64bit_number() % testing_images_.size();
+        double coin_flip = rnd.get_random_double();
+        if (coin_flip >= 0.5) { // get a positive example
+            while (testing_labels_[i] != testing_labels_[j]) {
+                j = rnd.get_random_64bit_number() % testing_images_.size();
+            }
             testing_labels.push_back(1);
         }
-        else {
+        else { // get a negative example
+            while (testing_labels_[i] == testing_labels_[j]) {
+                j = rnd.get_random_64bit_number() % testing_images_.size();
+            }
             testing_labels.push_back(0);
         }
+        // add image pair
+        testing_pairs.push_back(std::make_pair(testing_images_[i], testing_images_[j]));
     }
 }
 
@@ -417,12 +428,93 @@ int main(int argc, char* argv[]) try
     // special policy that only shrinks the learning rate when there has been no
     // progress in a specified number of batch iterations.
     trainer.set_iterations_without_progress_threshold(2000);
-    trainer.set_min_learning_rate(0.00001);
+    trainer.set_min_learning_rate(0.0001);
 
     // Train the network using the MNIST data.
     trainer.train(training_pairs, training_labels);
 
-    // Testing here.
+    // Save the network to disk. The clean call removes saved states that aren't
+    // necessary for proceeding with training.
+    net.clean();
+    dlib::serialize("mnist_siamese_network.dat") << net;
+
+    
+    // Let us now get training and testing results for this particular label
+    // threshold.
+    double thresh = 0.5;
+    for (unsigned int i = 0; i < 10; ++i) {
+        // This shows that how the label threshold defined above in the
+        // loss_contrastive layer can be modified.
+        dlib::layer<0>(net).loss_details().set_label_threshold(thresh);
+        std::cout << "Results for label_threshold=" << thresh << std::endl;
+
+        std::vector<unsigned char> predicted_labels = net(training_pairs);
+        int num_true_positives = 0;
+        int num_false_positives = 0;
+        int num_true_negatives = 0;
+        int num_false_negatives = 0;
+        for (std::size_t i = 0; i < training_pairs.size(); ++i) {
+            if (training_labels[i] == 1) {
+                if (predicted_labels[i] == 1) {
+                    ++num_true_positives;
+                }
+                else {
+                    ++num_false_positives;
+                }
+            }
+            else {
+                if (training_labels[i] == 0) {
+                    ++num_true_negatives;
+                }
+                else {
+                    ++num_false_negatives;
+                }
+            }
+        }
+        std::cout << "training num_true_positives: " << num_true_positives << std::endl;
+        std::cout << "training num_false_positives: " << num_false_positives << std::endl;
+        std::cout << "training num_true_negatives: " << num_true_negatives << std::endl;
+        std::cout << "training num_false_negatives: " << num_false_negatives << std::endl;
+        std::cout << "training accuracy:  "
+                  << (num_true_positives+num_true_negatives)/(double)(num_true_positives+
+                                                                      num_false_positives+
+                                                                      num_true_negatives+
+                                                                      num_false_negatives) << std::endl;
+
+        predicted_labels = net(testing_pairs);
+        num_true_positives = 0;
+        num_false_positives = 0;
+        num_true_negatives = 0;
+        num_false_negatives = 0;
+        for (std::size_t i = 0; i < testing_pairs.size(); ++i) {
+            if (testing_labels[i] == 1) {
+                if (predicted_labels[i] == 1) {
+                    ++num_true_positives;
+                }
+                else {
+                    ++num_false_positives;
+                }
+            }
+            else {
+                if (predicted_labels[i] == 0) {
+                    ++num_true_negatives;
+                }
+                else {
+                    ++num_false_negatives;
+                }
+            }
+        }
+        std::cout << "testing num_true_positives: " << num_true_positives << std::endl;
+        std::cout << "testing num_false_positives: " << num_false_positives << std::endl;
+        std::cout << "testing num_true_negatives: " << num_true_negatives << std::endl;
+        std::cout << "testing num_false_negatives: " << num_false_negatives << std::endl;
+        std::cout << "testing accuracy:  "
+                  << (num_true_positives+num_true_negatives)/(double)(num_true_positives+
+                                                                      num_false_positives+
+                                                                      num_true_negatives+
+                                                                      num_false_negatives) << std::endl;
+        thresh += 0.5;
+    }
 }
 catch (std::exception& e)
 {
