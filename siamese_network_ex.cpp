@@ -301,6 +301,9 @@ using loss_contrastive = dlib::add_loss_layer<loss_contrastive_,SUBNET>;    // <
 
 // ---------------------------------------------------------------------------
 
+// This function conveniently converts MNIST data into image pair data. This
+// operates similarly to the convert_mnist_siamese_data code in the Caffe
+// siamese example.
 void create_mnist_siamese_dataset(
     char* mnist_dir,
     std::vector<image_pair>& training_pairs,
@@ -369,13 +372,16 @@ int main(int argc, char* argv[]) try
         return 1;
     }
 
-    // These next statements load the dataset into memory.
     std::vector<image_pair> training_pairs;
     std::vector<unsigned char> training_labels;
     std::vector<image_pair> testing_pairs;
     std::vector<unsigned char> testing_labels;
     create_mnist_siamese_dataset(argv[1], training_pairs, training_labels, testing_pairs, testing_labels);
 
+    // We define the neural network structure here. This structure is similar to
+    // the one defined in the Caffe example (in
+    // mnist_siamese_train_test.prototxt). The final output that is fed in to
+    // the contrastive layer is a 2-vector.
     using net_type = loss_contrastive<
                          dlib::fc<2,
                          dlib::fc<10,
@@ -384,8 +390,8 @@ int main(int argc, char* argv[]) try
                          dlib::max_pool<2,2,2,2,dlib::relu<dlib::con<20,5,5,1,1,
                          input_image_pair>>>>>>>>>>>;
 
-    // Here, we set the parameters of the different layers. In order to have a
-    // similar network to 
+    // This instantiates the defined network and we set the bias learning rate
+    // multiplier to 2 to match the Caffe implementation.
     net_type net;
     dlib::layer<1>(net).layer_details().set_bias_learning_rate_multiplier(2);  // dlib::fc<2,...
     dlib::layer<2>(net).layer_details().set_bias_learning_rate_multiplier(2);  // dlib::fc<10,...
@@ -393,18 +399,30 @@ int main(int argc, char* argv[]) try
     dlib::layer<7>(net).layer_details().set_bias_learning_rate_multiplier(2);  // dlib::con<50,...
     dlib::layer<10>(net).layer_details().set_bias_learning_rate_multiplier(2); // dlib::con<20,...
 
+    // This pushes the network description to standard out.
     std::cout << "This network has " << net.num_layers << " layers in it." << std::endl;
     std::cout << net << std::endl;
 
+    // We make a trainer that uses SGD.
     dlib::dnn_trainer<net_type,dlib::sgd> trainer(net, dlib::sgd(0.0,0.9));
     trainer.set_learning_rate(0.01);
-    trainer.set_min_learning_rate(0.00001);
     trainer.set_mini_batch_size(64);
     trainer.be_verbose();
 
-    trainer.set_synchronization_file("mnist_siamese_sync", std::chrono::seconds(10));
+    // This saves the training progress in an synchronization file every 20
+    // seconds.
+    trainer.set_synchronization_file("mnist_siamese_sync", std::chrono::seconds(20));
 
+    // This sets the learning rate policy for this trainer. dlib's trainer has a
+    // special policy that only shrinks the learning rate when there has been no
+    // progress in a specified number of batch iterations.
+    trainer.set_iterations_without_progress_threshold(2000);
+    trainer.set_min_learning_rate(0.00001);
+
+    // Train the network using the MNIST data.
     trainer.train(training_pairs, training_labels);
+
+    // Testing here.
 }
 catch (std::exception& e)
 {
