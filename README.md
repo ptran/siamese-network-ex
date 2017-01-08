@@ -7,18 +7,20 @@ the [*dlib* machine learning library](http://dlib.net/)
 
 ![Embedding Output](embedding.png)
 
+
 Requirements
 ------------
 
 ### dlib
-* ***Version:*** >19.0
+* **Minimum Required Version:** 19.0
 * **Dependencies**
   * a `C++11`-compatible compiler (`g++`, `clang++`, etc...)
   * `CUDA 7.5`
   * `cuDNN v5`
 
 ### CMake
-* ***Version:*** 2.6
+* **Minimum Required Version:** 2.6
+
 
 Build
 -----
@@ -44,3 +46,23 @@ directory.
     cmake -DDLIB_CMAKE_FILE=$DLIB_ROOT\dlib\cmake ..
     cmake --build . --config release --target install
 ```
+
+
+Instructions
+------------
+
+After building and installing this project, first download the MNIST dataset by
+running `download_mnist.sh`. This script creates a `data` directory and
+downloads the dataset into it. Once the MNIST dataset download is completed, go
+to the `bin` directory and run the `siamese_network_ex` executable.
+
+In the repo's root directory
+``` bash
+./download_mnist.sh
+cd bin
+./siamese_network_ex ../data
+```
+
+This program creates two files: `mnist_siamese_network.dat` and
+`mnist_siamese_sync`. `mnist_siamese_network.dat` contains the weights of the
+neural network model and `mnist_siamese_sync` stores training progress.
