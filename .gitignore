@@ -1,2 +1,6 @@
-build
-data
+build/
+data/
+bin/
+
+# emacs byproducts
+flymd.*

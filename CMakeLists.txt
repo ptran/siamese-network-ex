@@ -11,4 +11,4 @@ endif()
 
 add_executable(${PROJECT_NAME} siamese_network_ex.cpp)
 target_link_libraries(${PROJECT_NAME} dlib)
-
+install(TARGETS ${PROJECT_NAME} DESTINATION ${CMAKE_CURRENT_SOURCE_DIR}/bin)
