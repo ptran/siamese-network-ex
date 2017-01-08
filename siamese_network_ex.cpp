@@ -1,8 +1,12 @@
+#include <algorithm>
+#include <iostream>
+#include <numeric>
 #include <utility>
 
-#include <dlib/dnn.h>
-#include <iostream>
 #include <dlib/data_io.h>
+#include <dlib/dnn.h>
+#include <dlib/gui_widgets.h>
+#include <dlib/image_transforms.h>
 
 // ---------------------------------------------------------------------------
 
@@ -47,13 +51,12 @@ public:
 
         for (auto i = ibegin; i != iend; ++i) {
             DLIB_CASSERT(i->first.nc() == nc && i->second.nc() == nc &&
-                         i->first.nr() == nr && i->second.nr() == nr,"");
+                         i->first.nr() == nr && i->second.nr() == nr, "");
         }
-
 
         // To get the actual data elements of the tensor, we can call the host()
         // function. This returns a pointer to the first float element. The
-        // tensor is structured in the following order: columns, rows, columns,
+        // tensor is structured in the following order: channels, rows, columns,
         // images. Therefore, the offset from image to image is
         // columns*rows*channels, channel to channel is columns*rows, etc...
         long offset = nr*nc;
@@ -68,6 +71,7 @@ public:
                     *(p+offset) = static_cast<float>(i->second(r,c))/256.0;
                 }
             }
+
             // In the loop above, we've already populated each image pair, so
             // here we jump to the next image pair.
             data_ptr += offset;
@@ -152,7 +156,7 @@ public:
     {
         const dlib::tensor& output_tensor = sub.get_output();
 
-        DLIB_CASSERT(output_tensor.nr() == 1 && 
+        DLIB_CASSERT(output_tensor.nr() == 1 &&
                      output_tensor.nc() == 1 ,"");
         DLIB_CASSERT(input_tensor.num_samples() == output_tensor.num_samples(),"");
 
@@ -160,7 +164,7 @@ public:
         // then compared with a label threshold.
         const float* out_data = output_tensor.host();
         long offset = output_tensor.k();
-        for (long i = 0; i < output_tensor.num_samples()/2; i += 2) {
+        for (long i = 0; i < output_tensor.num_samples(); i += 2) {
             float d = 0;
             for (long k = 0; k < output_tensor.k(); ++k) {
                 float temp = out_data[i*offset+k] - out_data[(i+1)*offset+k];
@@ -190,9 +194,9 @@ public:
         // Enforce expectations of our data. For this application, we expect the
         // data to be a vector across the channels. However, if the task was for
         // semantic segmentation, the output could be an entire image instead.
-        DLIB_CASSERT(output_tensor.nr() == 1 && 
+        DLIB_CASSERT(output_tensor.nr() == 1 &&
                      output_tensor.nc() == 1,"");
-        DLIB_CASSERT(grad.nr() == 1 && 
+        DLIB_CASSERT(grad.nr() == 1 &&
                      grad.nc() == 1,"");
 
         // Enforce interface expectations.
@@ -211,7 +215,7 @@ public:
         double loss = 0;
         const float* out_data = output_tensor.host();
         float* g = grad.host();
-        for (long i = 0; i < output_tensor.num_samples()/2; i += 2) {
+        for (long i = 0; i < output_tensor.num_samples(); i += 2) {
             const float y = *truth++;
 
             // Make sure the labels are 0 or 1
@@ -223,35 +227,35 @@ public:
             x1.set_size(output_tensor.k());
             x2.set_size(output_tensor.k());
             for (long k = 0; k < output_tensor.k(); ++k) {
-                x1 = out_data[i*output_tensor.k()+k];
-                x2 = out_data[(i+1)*output_tensor.k()+k];
+                x1(k) = out_data[(i)*output_tensor.k()+k];
+                x2(k) = out_data[(i+1)*output_tensor.k()+k];
             }
 
             float d = dlib::length(x1-x2); // euclidean distance of x1 and x2
+            float gscale = 2.0*scale;
             if (y) {
                 loss += d*d;
                 // NOTE: 2.0 comes from the derivative of squared(x1-x2)
-                float gscale = 2.0*scale;
                 for (long k = 0; k < output_tensor.k(); ++k) {
-                    g[i*output_tensor.k()+k] = gscale*(x1(k)-x2(k));
+                    g[(i)*output_tensor.k()+k] = gscale*(x1(k)-x2(k));
                     g[(i+1)*output_tensor.k()+k] = gscale*(x2(k)-x1(k));
                 }
             }
             else {
                 float temp = margin-d;
                 // The following handles the max behavior
-                if (temp > 0) {
+                if (temp > 0.0f) {
                     loss += temp*temp;
                     // NOTE: 1e-4 prevents 0 division
-                    float gscale = -2.0*scale*temp/(d+1e-4);
+                    gscale *= -temp/(d+1e-4);
                     for (long k = 0; k < output_tensor.k(); ++k) {
-                        g[i*output_tensor.k()+k] = gscale*(x1(k)-x2(k));
+                        g[(i)*output_tensor.k()+k] = gscale*(x1(k)-x2(k));
                         g[(i+1)*output_tensor.k()+k] = gscale*(x2(k)-x1(k));
                     }
                 }
                 else {
                     for (long k = 0; k < output_tensor.k(); ++k) {
-                        g[i*output_tensor.k()+k] = 0.0;
+                        g[(i)*output_tensor.k()+k] = 0.0;
                         g[(i+1)*output_tensor.k()+k] = 0.0;
                     }
                 }
@@ -300,7 +304,6 @@ private:
     double margin;
     double thresh;
 };
-
 
 // The last implementation piece is to set an alias for our loss layer.
 template <typename SUBNET>
@@ -371,6 +374,33 @@ void create_mnist_siamese_dataset(
 
 // ---------------------------------------------------------------------------
 
+// Extends input for creating a test network from our custom input_image_pair
+// layer
+class extended_input : public dlib::input<dlib::matrix<unsigned char>> {
+public:
+    extended_input() : dlib::input<dlib::matrix<unsigned char>>() { }
+    extended_input(const input_image_pair& item) : dlib::input<dlib::matrix<unsigned char>>() { }
+};
+
+// ---------------------------------------------------------------------------
+
+template <typename data_type, typename label_type>
+void shuffle_dataset(std::vector<data_type>& data, std::vector<label_type>& labels)
+{
+    // Create a shuffled vector from [0, data.size())
+    std::vector<unsigned long> range(data.size());
+    std::iota(range.begin(), range.end(), 0);
+    std::random_shuffle(range.begin(), range.end());
+
+    // Swap elements based on the shuffled vector
+    for (unsigned long i = 0; i < range.size(); ++i) {
+        std::iter_swap(data.begin()+i, data.begin()+range[i]);
+        std::iter_swap(labels.begin()+i, labels.begin()+range[i]);
+    }
+}
+
+// ---------------------------------------------------------------------------
+
 int main(int argc, char* argv[]) try
 {
     // This example is going to run on the MNIST dataset.
@@ -384,10 +414,11 @@ int main(int argc, char* argv[]) try
     }
 
     std::vector<image_pair> training_pairs;
-    std::vector<unsigned char> training_labels;
+    std::vector<unsigned char> pairwise_training_labels;
     std::vector<image_pair> testing_pairs;
-    std::vector<unsigned char> testing_labels;
-    create_mnist_siamese_dataset(argv[1], training_pairs, training_labels, testing_pairs, testing_labels);
+    std::vector<unsigned char> pairwise_testing_labels;
+    create_mnist_siamese_dataset(argv[1], training_pairs, pairwise_training_labels,
+                                 testing_pairs, pairwise_testing_labels);
 
     // We define the neural network structure here. This structure is similar to
     // the one defined in the Caffe example (in
@@ -395,11 +426,11 @@ int main(int argc, char* argv[]) try
     // the contrastive layer is a 2-vector.
     using net_type = loss_contrastive<
                          dlib::fc<2,
-                         dlib::fc<10,
-                         dlib::relu<dlib::fc<500,
-                         dlib::max_pool<2,2,2,2,dlib::relu<dlib::con<50,5,5,1,1,
-                         dlib::max_pool<2,2,2,2,dlib::relu<dlib::con<20,5,5,1,1,
-                         input_image_pair>>>>>>>>>>>;
+                         dlib::fc<10,dlib::relu<
+                         dlib::fc<500,
+                         dlib::max_pool<2,2,2,2,dlib::con<50,5,5,1,1,
+                         dlib::max_pool<2,2,2,2,dlib::con<20,5,5,1,1,
+                         input_image_pair>>>>>>>>>;
 
     // This instantiates the defined network and we set the bias learning rate
     // multiplier to 2 to match the Caffe implementation.
@@ -407,113 +438,132 @@ int main(int argc, char* argv[]) try
     dlib::layer<1>(net).layer_details().set_bias_learning_rate_multiplier(2);  // dlib::fc<2,...
     dlib::layer<2>(net).layer_details().set_bias_learning_rate_multiplier(2);  // dlib::fc<10,...
     dlib::layer<4>(net).layer_details().set_bias_learning_rate_multiplier(2);  // dlib::fc<500,...
-    dlib::layer<7>(net).layer_details().set_bias_learning_rate_multiplier(2);  // dlib::con<50,...
-    dlib::layer<10>(net).layer_details().set_bias_learning_rate_multiplier(2); // dlib::con<20,...
+    dlib::layer<6>(net).layer_details().set_bias_learning_rate_multiplier(2);  // dlib::con<50,...
+    dlib::layer<8>(net).layer_details().set_bias_learning_rate_multiplier(2);  // dlib::con<20,...
 
     // This pushes the network description to standard out.
     std::cout << "This network has " << net.num_layers << " layers in it." << std::endl;
     std::cout << net << std::endl;
 
-    // We make a trainer that uses SGD.
-    dlib::dnn_trainer<net_type,dlib::sgd> trainer(net, dlib::sgd(0.0,0.9));
-    trainer.set_learning_rate(0.01);
-    trainer.set_mini_batch_size(64);
-    trainer.set_max_num_epochs(100);
+    // We make a trainer that uses an SGD solver with the same settings as those
+    // from Caffe's Siamese example.
+    dlib::sgd solver(0.0, 0.9); // 0.0 weight decay, 0.9 momentum
+
+    dlib::dnn_trainer<net_type> trainer(net, solver);
     trainer.be_verbose();
 
     // This saves the training progress in an synchronization file every 20
     // seconds.
     trainer.set_synchronization_file("mnist_siamese_sync", std::chrono::seconds(20));
 
-    // This sets the learning rate policy for this trainer. dlib's trainer has a
-    // special policy that only shrinks the learning rate when there has been no
-    // progress in a specified number of batch iterations.
-    trainer.set_iterations_without_progress_threshold(2500);
-    trainer.set_learning_rate_shrink_factor(0.9);
+    // This sets the learning rate policy for this trainer. A learning rate
+    // policy can be set by trainer.set_learning_rate_schedule(schedule), where
+    // `schedule` is a vector of learning rates. Here, we create a inverse
+    // learning rate policy for 50000 iterations.
+    unsigned long max_iterations = 50000;
+    unsigned long current_iteration = trainer.get_train_one_step_calls();
 
-    // Train the network using the MNIST data.
-    trainer.train(training_pairs, training_labels);
+    dlib::matrix<double,0,1> inverse_learning_rate_schedule;
+    inverse_learning_rate_schedule.set_size(max_iterations-current_iteration);
+    double learning_rate = 0.01;
+    double gamma = 0.0001;
+    double power = 0.75;
+    for (unsigned long i = current_iteration; i < max_iterations; ++i) {
+        inverse_learning_rate_schedule(i-current_iteration) = learning_rate*std::pow(1.0+gamma*i, -power);
+    }
+    trainer.set_learning_rate_schedule(inverse_learning_rate_schedule);
+
+    // Train the network with a batch size of 64
+    unsigned long batch_size = 64;
+    shuffle_dataset(training_pairs, pairwise_training_labels);
+
+    unsigned long train_batch_begin = 0;
+    while (trainer.get_train_one_step_calls() < max_iterations) {
+        unsigned long train_batch_end = std::min(train_batch_begin+batch_size, training_pairs.size());
+        trainer.train_one_step(training_pairs.begin()+train_batch_begin,
+                               training_pairs.begin()+train_batch_end,
+                               pairwise_training_labels.begin()+train_batch_begin);
+
+        if (trainer.get_train_one_step_calls() % 2500 == 0 || trainer.get_train_one_step_calls() == 1) {
+            // Find the average testing loss over a batch size of 100
+            double average_testing_loss = 0;
+            unsigned int num_test_batch = testing_pairs.size()/100;
+            for (unsigned int i = 0; i < num_test_batch; ++i) {
+                auto test_batch_begin = testing_pairs.begin() + i*100;
+                auto test_batch_end = testing_pairs.begin() + (i+1)*100;
+                auto test_batch_lbegin = pairwise_testing_labels.begin() + i*100;
+                average_testing_loss += trainer.get_net().compute_loss(test_batch_begin,
+                                                                       test_batch_end,
+                                                                       test_batch_lbegin);
+            }
+            std::cout << "step#: " << trainer.get_train_one_step_calls()
+                      << "  average testing loss: " << average_testing_loss/num_test_batch
+                      << std::endl;
+        }
+
+        // Iterate the dataset index
+        train_batch_begin += batch_size;
+        if (train_batch_begin >= training_pairs.size()) {
+            shuffle_dataset(training_pairs, pairwise_training_labels);
+            train_batch_begin = 0;
+        }
+    }
 
     // Save the network to disk. The clean call removes saved states that aren't
     // necessary for proceeding with training.
     net.clean();
     dlib::serialize("mnist_siamese_network.dat") << net;
 
-    
-    // Let us now get training and testing results for this particular label
-    // threshold.
-    double thresh = 1.25;
+    // ======================== //
+    //  EMBEDDING DISPLAY CODE  //
+    // ======================== //
+    // Define a network with that outputs the 2-vector produced by a given
+    // input.
+    using tnet_type = dlib::fc<2,
+                      dlib::fc<10,dlib::relu<
+                      dlib::fc<500,
+                      dlib::max_pool<2,2,2,2,dlib::con<50,5,5,1,1,
+                      dlib::max_pool<2,2,2,2,dlib::con<20,5,5,1,1,
+                      extended_input>>>>>>>>;
+    tnet_type tnet = net.subnet();
 
-    // This shows that how the label threshold defined above in the
-    // loss_contrastive layer can be modified.
-    dlib::layer<0>(net).loss_details().set_label_threshold(thresh);
-    std::cout << "Results for label_threshold=" << thresh << std::endl;
+    // Load MNIST testing imagery
+    std::vector<dlib::matrix<unsigned char>> testing_images;
+    std::vector<unsigned long> testing_labels;
+    {
+        std::vector<dlib::matrix<unsigned char>> training_images;
+        std::vector<unsigned long> training_labels;
+        dlib::load_mnist_dataset(argv[1], training_images, training_labels, testing_images,  testing_labels);
+    }
 
-    std::vector<unsigned char> predicted_labels = net(training_pairs);
-    int num_true_positives = 0;
-    int num_false_positives = 0;
-    int num_true_negatives = 0;
-    int num_false_negatives = 0;
-    for (std::size_t i = 0; i < training_pairs.size(); ++i) {
-        if (training_labels[i] == 1) {
-            if (predicted_labels[i] == 1) {
-                ++num_true_positives;
-            }
-            else {
-                ++num_false_positives;
-            }
-        }
-        else {
-            if (predicted_labels[i] == 0) {
-                ++num_true_negatives;
-            }
-            else {
-                ++num_false_negatives;
-            }
+    // Below we define a vector of colors for plotting Siamese network
+    // embeddings for digit
+    std::vector<dlib::rgb_pixel> mnist_colors(10);
+    mnist_colors[0] = dlib::rgb_pixel(255,   0,   0);
+    mnist_colors[1] = dlib::rgb_pixel(255, 255,   0);
+    mnist_colors[2] = dlib::rgb_pixel(  0, 255,   0);
+    mnist_colors[3] = dlib::rgb_pixel(  0, 255, 255);
+    mnist_colors[4] = dlib::rgb_pixel(  0,   0, 255);
+    mnist_colors[5] = dlib::rgb_pixel(255,   0, 255);
+    mnist_colors[6] = dlib::rgb_pixel(153,   0,   0);
+    mnist_colors[7] = dlib::rgb_pixel(153, 153,   0);
+    mnist_colors[8] = dlib::rgb_pixel(  0, 153,   0);
+    mnist_colors[9] = dlib::rgb_pixel(  0, 153, 153);
+
+    dlib::array2d<unsigned char> img(400,500);
+    dlib::assign_all_pixels(img, 0);
+    dlib::image_window win(img);
+    dlib::rand rng;
+    for (unsigned long i = 0; i < testing_images.size(); ++i) {
+        if (rng.get_random_double() > 0.75) { // show 25% of all points
+            dlib::matrix<float,2,1> embedding = dlib::round(125.0*dlib::mat(tnet(testing_images[i])));
+            dlib::point center(embedding(0)+225, embedding(1)+200);
+            dlib::image_window::overlay_circle circle(center, 2, mnist_colors[testing_labels[i]]);
+            win.add_overlay(circle);
         }
     }
-    std::cout << "training num_true_positives: " << num_true_positives << std::endl;
-    std::cout << "training num_false_positives: " << num_false_positives << std::endl;
-    std::cout << "training num_true_negatives: " << num_true_negatives << std::endl;
-    std::cout << "training num_false_negatives: " << num_false_negatives << std::endl;
-    std::cout << "training accuracy:  "
-              << (num_true_positives+num_true_negatives)/(double)(num_true_positives+
-                                                                  num_false_positives+
-                                                                  num_true_negatives+
-                                                                  num_false_negatives) << std::endl;
-
-    predicted_labels = net(testing_pairs);
-    num_true_positives = 0;
-    num_false_positives = 0;
-    num_true_negatives = 0;
-    num_false_negatives = 0;
-    for (std::size_t i = 0; i < testing_pairs.size(); ++i) {
-        if (testing_labels[i] == 1) {
-            if (predicted_labels[i] == 1) {
-                ++num_true_positives;
-            }
-            else {
-                ++num_false_positives;
-            }
-        }
-        else {
-            if (predicted_labels[i] == 0) {
-                ++num_true_negatives;
-            }
-            else {
-                ++num_false_negatives;
-            }
-        }
-    }
-    std::cout << "testing num_true_positives: " << num_true_positives << std::endl;
-    std::cout << "testing num_false_positives: " << num_false_positives << std::endl;
-    std::cout << "testing num_true_negatives: " << num_true_negatives << std::endl;
-    std::cout << "testing num_false_negatives: " << num_false_negatives << std::endl;
-    std::cout << "testing accuracy:  "
-              << (num_true_positives+num_true_negatives)/(double)(num_true_positives+
-                                                                  num_false_positives+
-                                                                  num_true_negatives+
-                                                                  num_false_negatives) << std::endl;
+    win.wait_until_closed();
+    tnet.clean();
 }
 catch (std::exception& e)
 {
