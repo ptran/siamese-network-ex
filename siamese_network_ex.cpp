@@ -120,13 +120,23 @@ public:
     // labels. Since each sample pair is associated with a label, the factor is
     // set to 2.
     const static unsigned int sample_expansion_factor = 2;
+
+#ifdef NEW_DLIB_LOSS
+    typedef unsigned char training_label_type;
+    typedef unsigned char output_label_type;
+#else
     typedef unsigned char label_type;
+#endif
 
     // Contrastive loss is defined as
     //    loss = 0.5/num_samples * sum(y*d*d + (1-y)*pow(max(margin-d,0),2))
     // where d is the euclidean distance between two samples.
     loss_contrastive_(double margin_=1.0, double thresh_=1.0)
         : margin(margin_), thresh(thresh_)
+    { }
+
+    loss_contrastive_(const loss_contrastive_& item)
+        : margin(item.margin), thresh(item.thresh)
     { }
 
     // The label threshold here just defines a distance with which we say image
