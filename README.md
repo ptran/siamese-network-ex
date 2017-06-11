@@ -3,10 +3,15 @@ Siamese Network Example
 
 This repo showcases how to create a Siamese network using the tools provided by
 the [*dlib* machine learning library](http://dlib.net/)
-([github link](https://github.com/davisking/dlib)).
+([github link](https://github.com/davisking/dlib)). All the layer definition,
+training, and testing code is in `main.cpp`.
 
 ![Embedding Output](embedding.png)
 
+The image above shows the embedding learned by the Siamese network using this
+example. Each plotted circle represents a sample in the test set and the color
+is determined the number label (e.g. zeroes are the red circles on the
+upper-left).
 
 Requirements
 ------------
