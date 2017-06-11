@@ -121,7 +121,7 @@ public:
     // set to 2.
     const static unsigned int sample_expansion_factor = 2;
 
-#ifdef NEW_DLIB_LOSS
+#ifdef NEW_DLIB_LOSS // new definition requirements for dlib >19.2
     typedef unsigned char training_label_type;
     typedef unsigned char output_label_type;
 #else
@@ -345,13 +345,13 @@ void create_mnist_siamese_dataset(
         unsigned long j = rnd.get_random_64bit_number() % training_images_.size();
         double coin_flip = rnd.get_random_double();
         if (coin_flip >= 0.5) { // get a positive example
-            while (training_labels_[i] != training_labels_[j]) {
+            while (training_labels_[i] != training_labels_[j] || i == j) {
                 j = rnd.get_random_64bit_number() % training_images_.size();
             }
             training_labels.push_back(1);
         }
         else { // get a negative example
-            while (training_labels_[i] == training_labels_[j]) {
+            while (training_labels_[i] == training_labels_[j] || i == j) {
                 j = rnd.get_random_64bit_number() % training_images_.size();
             }
             training_labels.push_back(0);
@@ -473,15 +473,18 @@ int main(int argc, char* argv[]) try
     unsigned long max_iterations = 50000;
     unsigned long current_iteration = trainer.get_train_one_step_calls();
 
-    dlib::matrix<double,0,1> inverse_learning_rate_schedule;
-    inverse_learning_rate_schedule.set_size(max_iterations-current_iteration);
-    double learning_rate = 0.01;
-    double gamma = 0.0001;
-    double power = 0.75;
-    for (unsigned long i = current_iteration; i < max_iterations; ++i) {
-        inverse_learning_rate_schedule(i-current_iteration) = learning_rate*std::pow(1.0+gamma*i, -power);
+    unsigned long remaining_iterations = max_iterations-current_iteration;
+    if (remaining_iterations > 0) {
+        dlib::matrix<double,0,1> inverse_learning_rate_schedule;
+        inverse_learning_rate_schedule.set_size(max_iterations-current_iteration);
+        double learning_rate = 0.01;
+        double gamma = 0.0001;
+        double power = 0.75;
+        for (unsigned long i = current_iteration; i < max_iterations; ++i) {
+            inverse_learning_rate_schedule(i-current_iteration) = learning_rate*std::pow(1.0+gamma*i, -power);
+        }
+        trainer.set_learning_rate_schedule(inverse_learning_rate_schedule);
     }
-    trainer.set_learning_rate_schedule(inverse_learning_rate_schedule);
 
     // Train the network with a batch size of 64
     unsigned long batch_size = 64;
