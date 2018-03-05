@@ -38,7 +38,7 @@ directory.
     # create a directory to contain all build by-products
     mkdir build
     cd build
-    cmake -DDLIB_CMAKE_FILE=$DLIB_ROOT/dlib/cmake ..
+    cmake -DDLIB_DIR=$DLIB_ROOT -DDLIB_CMAKE_FILE=$DLIB_ROOT/dlib/cmake ..
     make && make install
 ```
 `$DLIB_ROOT` is the path to the root directory of the *dlib* library.
